@@ -1,3 +1,5 @@
+const http = require('http');
+http.createServer((req, res) => res.end('NEXUS REACT is online')).listen(process.env.PORT || 3000);
 const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const config = require('./config.js');
