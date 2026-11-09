@@ -33,18 +33,9 @@ def parse_time(s):
     mp = {"s":1000,"m":60000,"h":3600000,"d":86400000,"mo":2592000000,"y":31536000000}
     return int(m.group(1)) * mp[m.group(2)]
 
-# NEW: Split emojis even if no spaces - 💎😍😂 -> ["💎","😍","😂"]
 def parse_emojis(text):
-    # Custom emojis like <:name:123> or <a:name:123>
-    customs = re.findall(r"<a?:\w+:\d+>", text)
-    # Remove customs, then get each unicode emoji char
-    rest = re.sub(r"<a?:\w+:\d+>", " ", text)
-    # Match unicode emojis + letters like NG, etc - we keep only emoji chars
-    unis = re.findall(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\U0001F1E6-\U0001F1FF]+|.", rest)
-    # Simpler: use regex for emoji ranges
     import re as _re
     found = _re.findall(r"<a?:\w+:\d+>|[\U0001F300-\U0001FAFF\u2600-\u26FF\u2700-\u27BF\U0001F1E6-\U0001F1FF]", text)
-    # Deduplicate keep order, also handle ✅ etc which are in range
     seen = []
     for e in found:
         if e not in seen: seen.append(e)
@@ -84,14 +75,14 @@ async def on_message(message):
     except Exception as ex: print("ON_MESSAGE FAIL", ex)
 
 @bot.tree.command(name="premium", description="Give premium to a user (Owner only)")
-async def premium_cmd(interaction: discord.Interaction, user: discord.Member, time: str):
+async def premium_cmd(interaction: discord.Interaction, user: discord.Member, duration: str):
     try:
         if not is_owner(interaction.user.id): return await interaction.response.send_message(owner_msg(), ephemeral=True)
-        ms = parse_time(time)
+        ms = parse_time(duration)
         if not ms: return await interaction.response.send_message("Bad time. Use 30s / 10m / 2h / 7d / 1mo / 1y", ephemeral=True)
         db["premium"][str(user.id)] = time.time()*1000 + ms
         save()
-        await interaction.response.send_message(f"✅ {user.mention} got PREMIUM for {time} 👑")
+        await interaction.response.send_message(f"✅ {user.mention} got PREMIUM for {duration} 👑")
     except Exception as e:
         print("PREMIUM FAIL", e)
         try: await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
@@ -208,6 +199,18 @@ async def claim_owner(interaction: discord.Interaction, key: str):
         OWNER_ID = str(interaction.user.id)
         await interaction.response.send_message("✅ You are now the Owner! Update OWNER_ID in Render too.", ephemeral=True)
     else: await interaction.response.send_message("❌ Wrong key", ephemeral=True)
+
+# NEW - /help command
+@bot.tree.command(name="help", description="Show all NEXUS REACT commands")
+async def help_cmd(interaction: discord.Interaction):
+    embed = discord.Embed(title="👑 NEXUS REACT - All Commands", description=f"Owner: {OWNER_USERNAME}\nPremium = unlimited emojis + autoreact", color=0xFFD700)
+    embed.add_field(name="👑 Premium", value="`/premium user: @user duration: 1y` - Give premium (Owner)\n`/remove-premium user: @user` - Remove premium\n`/premium-check user: @user` - Check premium\n\nTime: `30s` `10m` `2h` `7d` `1mo` `1y`", inline=False)
+    embed.add_field(name="💎 React", value="`/react link: <message-link> emojis: 🔥 👑 💎`\n`/react-all emojis: 🔥 👑`\n`/react-boost` - React to your last message", inline=False)
+    embed.add_field(name="⚡ Autoreact", value="`/autoreact-add-channel channel: #general emojis: 💎 🔥`\n`/autoreact-add-user user: @user emojis: 😍 😂`\n`/autoreact-remove`\n`/autoreact-list`\n`/autoreact-toggle state: on/off`", inline=False)
+    embed.add_field(name="🏷️ Tag React", value="`/tagreact-on emojis: 👑 🔥 💎`\n`/tagreact-set emojis: 👑 🔥`\n`/tagreact-off`\n`/tagreact-list`", inline=False)
+    embed.add_field(name="🆘 Other", value="`/help` - This menu\n`/claim-owner key: <your-key>` - Become owner", inline=False)
+    embed.set_footer(text="NEXUS REACT • Made by KING Tyler Hayes")
+    await interaction.response.send_message(embed=embed)
 
 TOKEN = os.getenv('DISCORD_TOKEN')
 print('TOKEN CHECK - length:', len(TOKEN) if TOKEN else 'MISSING')
