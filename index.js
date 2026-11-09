@@ -174,4 +174,5 @@ client.on('messageCreate', async (message) => {
   }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+console.log('TOKEN CHECK - length:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.length : 'MISSING');
+client.login(process.env.DISCORD_TOKEN).catch(err => console.log('LOGIN FAILED:', err.message));
