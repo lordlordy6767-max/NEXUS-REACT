@@ -33,6 +33,23 @@ def parse_time(s):
     mp = {"s":1000,"m":60000,"h":3600000,"d":86400000,"mo":2592000000,"y":31536000000}
     return int(m.group(1)) * mp[m.group(2)]
 
+# NEW: Split emojis even if no spaces - 💎😍😂 -> ["💎","😍","😂"]
+def parse_emojis(text):
+    # Custom emojis like <:name:123> or <a:name:123>
+    customs = re.findall(r"<a?:\w+:\d+>", text)
+    # Remove customs, then get each unicode emoji char
+    rest = re.sub(r"<a?:\w+:\d+>", " ", text)
+    # Match unicode emojis + letters like NG, etc - we keep only emoji chars
+    unis = re.findall(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\U0001F1E6-\U0001F1FF]+|.", rest)
+    # Simpler: use regex for emoji ranges
+    import re as _re
+    found = _re.findall(r"<a?:\w+:\d+>|[\U0001F300-\U0001FAFF\u2600-\u26FF\u2700-\u27BF\U0001F1E6-\U0001F1FF]", text)
+    # Deduplicate keep order, also handle ✅ etc which are in range
+    seen = []
+    for e in found:
+        if e not in seen: seen.append(e)
+    return seen
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -50,27 +67,35 @@ async def on_ready():
 @bot.event
 async def on_message(message):
     if message.author.bot: return
+    await bot.process_commands(message)
     if not db.get("autoreactEnabled", True): return
-    for uid, emojis in db.get("tagreact", {}).items():
-        if any(str(u.id) == uid for u in message.mentions.users):
-            for e in emojis:
-                try: await message.add_reaction(e)
-                except: pass
-    for e in db.get("autoreactChannel", {}).get(str(message.channel.id), []):
-        try: await message.add_reaction(e)
-        except: pass
-    for e in db.get("autoreactUser", {}).get(str(message.author.id), []):
-        try: await message.add_reaction(e)
-        except: pass
+    try:
+        for uid, emojis in db.get("tagreact", {}).items():
+            if any(str(u.id) == uid for u in message.mentions.users):
+                for e in emojis:
+                    try: await message.add_reaction(e)
+                    except Exception as ex: print("TAG REACT FAIL", e, ex)
+        for e in db.get("autoreactChannel", {}).get(str(message.channel.id), []):
+            try: await message.add_reaction(e)
+            except Exception as ex: print("CH REACT FAIL", e, ex)
+        for e in db.get("autoreactUser", {}).get(str(message.author.id), []):
+            try: await message.add_reaction(e)
+            except Exception as ex: print("USER REACT FAIL", e, ex)
+    except Exception as ex: print("ON_MESSAGE FAIL", ex)
 
 @bot.tree.command(name="premium", description="Give premium to a user (Owner only)")
 async def premium_cmd(interaction: discord.Interaction, user: discord.Member, time: str):
-    if not is_owner(interaction.user.id): return await interaction.response.send_message(owner_msg(), ephemeral=True)
-    ms = parse_time(time)
-    if not ms: return await interaction.response.send_message("Bad time. Use 30s / 10m / 2h / 7d / 1mo / 1y", ephemeral=True)
-    db["premium"][str(user.id)] = time.time()*1000 + ms
-    save()
-    await interaction.response.send_message(f"✅ {user.mention} got PREMIUM for {time} 👑")
+    try:
+        if not is_owner(interaction.user.id): return await interaction.response.send_message(owner_msg(), ephemeral=True)
+        ms = parse_time(time)
+        if not ms: return await interaction.response.send_message("Bad time. Use 30s / 10m / 2h / 7d / 1mo / 1y", ephemeral=True)
+        db["premium"][str(user.id)] = time.time()*1000 + ms
+        save()
+        await interaction.response.send_message(f"✅ {user.mention} got PREMIUM for {time} 👑")
+    except Exception as e:
+        print("PREMIUM FAIL", e)
+        try: await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+        except: pass
 
 @bot.tree.command(name="remove-premium", description="Remove premium (Owner only)")
 async def remove_premium_cmd(interaction: discord.Interaction, user: discord.Member):
@@ -85,7 +110,7 @@ async def premium_check_cmd(interaction: discord.Interaction, user: discord.Memb
 
 @bot.tree.command(name="react", description="React to a message by link")
 async def react_cmd(interaction: discord.Interaction, link: str, emojis: str):
-    emoji_list = emojis.split()
+    emoji_list = parse_emojis(emojis)
     if not has_premium(interaction.user.id) and len(emoji_list) > 3: return await interaction.response.send_message(premium_msg(), ephemeral=True)
     if has_premium(interaction.user.id) and len(emoji_list) > 20: return await interaction.response.send_message("Max 20 emojis", ephemeral=True)
     m = re.search(r"channels\/\d+\/(\d+)\/(\d+)", link)
@@ -102,14 +127,16 @@ async def react_cmd(interaction: discord.Interaction, link: str, emojis: str):
 @bot.tree.command(name="autoreact-add-channel", description="Auto-react in a channel (Premium)")
 async def ar_add_ch(interaction: discord.Interaction, channel: discord.TextChannel, emojis: str):
     if not has_premium(interaction.user.id): return await interaction.response.send_message(premium_msg(), ephemeral=True)
-    db["autoreactChannel"][str(channel.id)] = emojis.split(); save()
-    await interaction.response.send_message(f"✅ Autoreact added for {channel.mention}: {emojis}")
+    parsed = parse_emojis(emojis)
+    db["autoreactChannel"][str(channel.id)] = parsed; save()
+    await interaction.response.send_message(f"✅ Autoreact added for {channel.mention}: {' '.join(parsed)}")
 
 @bot.tree.command(name="autoreact-add-user", description="Auto-react to a user (Premium)")
 async def ar_add_user(interaction: discord.Interaction, user: discord.Member, emojis: str):
     if not has_premium(interaction.user.id): return await interaction.response.send_message(premium_msg(), ephemeral=True)
-    db["autoreactUser"][str(user.id)] = emojis.split(); save()
-    await interaction.response.send_message(f"✅ Autoreact added for {user.mention}: {emojis}")
+    parsed = parse_emojis(emojis)
+    db["autoreactUser"][str(user.id)] = parsed; save()
+    await interaction.response.send_message(f"✅ Autoreact added for {user.mention}: {' '.join(parsed)}")
 
 @bot.tree.command(name="autoreact-remove", description="Remove autoreact")
 async def ar_remove(interaction: discord.Interaction, channel: discord.TextChannel = None, user: discord.Member = None):
@@ -133,7 +160,7 @@ async def react_all(interaction: discord.Interaction, emojis: str):
     await interaction.response.defer()
     msgs = [m async for m in interaction.channel.history(limit=10)]
     for m in msgs:
-        for e in emojis.split():
+        for e in parse_emojis(emojis):
             try: await m.add_reaction(e)
             except: pass
     await interaction.followup.send("✅ Reacted to last 10 messages")
@@ -154,13 +181,15 @@ async def react_boost(interaction: discord.Interaction):
 @bot.tree.command(name="tagreact-on", description="Turn tag react on (Premium)")
 async def tag_on(interaction: discord.Interaction, emojis: str):
     if not has_premium(interaction.user.id): return await interaction.response.send_message(premium_msg(), ephemeral=True)
-    db["tagreact"][str(interaction.user.id)] = emojis.split(); save()
-    await interaction.response.send_message(f"✅ TAG REACT ON: {emojis} - When anyone tags you, bot will react 👑")
+    parsed = parse_emojis(emojis)
+    db["tagreact"][str(interaction.user.id)] = parsed; save()
+    await interaction.response.send_message(f"✅ TAG REACT ON: {' '.join(parsed)} - When anyone tags you, bot will react 👑")
 
 @bot.tree.command(name="tagreact-set", description="Update tag react emojis")
 async def tag_set(interaction: discord.Interaction, emojis: str):
-    db["tagreact"][str(interaction.user.id)] = emojis.split(); save()
-    await interaction.response.send_message(f"✅ Tag react updated: {emojis}")
+    parsed = parse_emojis(emojis)
+    db["tagreact"][str(interaction.user.id)] = parsed; save()
+    await interaction.response.send_message(f"✅ Tag react updated: {' '.join(parsed)}")
 
 @bot.tree.command(name="tagreact-off", description="Turn tag react off")
 async def tag_off(interaction: discord.Interaction):
