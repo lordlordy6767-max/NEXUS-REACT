@@ -175,4 +175,6 @@ client.on('messageCreate', async (message) => {
 });
 
 console.log('TOKEN CHECK - length:', process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.length : 'MISSING');
-client.login(process.env.DISCORD_TOKEN).catch(err => console.log('LOGIN FAILED:', err.message));
+client.login(process.env.DISCORD_TOKEN.trim()).then(() => console.log('LOGIN SUCCESS - BOT IS ONLINE')).catch(err => console.log('LOGIN FAILED:', err.message));
+client.on('clientReady', () => console.log('NEXUS REACT logged in as', client.user.tag));
+client.on('ready', () => console.log('NEXUS REACT logged in as', client.user.tag));
